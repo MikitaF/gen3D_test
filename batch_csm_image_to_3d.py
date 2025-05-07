@@ -28,10 +28,48 @@ def get_github_raw_url(filename):
     return f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}/{CONCEPTS_DIR}/{filename}"
 
 
-def start_session(image_url):
+def prompt_user_settings():
+    print("\n--- 3D Generation Settings ---")
+    geometry = input("Choose geometry model ([T]urbo/[B]ase, default: Turbo): ").strip().lower()
+    if geometry == 'b':
+        geometry_model = 'base'
+    else:
+        geometry_model = 'turbo'
+
+    texture = input("Texture? [N]one/[B]aked/[P]BR (default: None): ").strip().lower()
+    if texture == 'b':
+        texture_model = 'baked'
+    elif texture == 'p':
+        texture_model = 'pbr'
+    else:
+        texture_model = 'none'
+
+    print("Polygon amount? [H]igh (100000) / [M]id (20000) / [L]ow (5000) / [C]ustom (default: High): ", end="")
+    resolution = input().strip().lower()
+    if resolution == 'l':
+        resolution_val = 5000
+    elif resolution == 'm':
+        resolution_val = 20000
+    elif resolution == 'c':
+        custom_val = input("Enter custom polygon count (number): ").strip()
+        if custom_val.isdigit():
+            resolution_val = int(custom_val)
+        else:
+            print("Invalid number, using 100000 (High).")
+            resolution_val = 100000
+    else:
+        resolution_val = 100000
+
+    print(f"\nSettings: geometry={geometry_model}, texture={texture_model}, resolution={resolution_val}\n")
+    return geometry_model, texture_model, resolution_val
+
+
+def start_session(image_url, geometry_model, texture_model, resolution):
     payload = {
         "image_url": image_url,
-        "geometry_model": "turbo"
+        "geometry_model": geometry_model,
+        "texture_model": texture_model,
+        "resolution": resolution
     }
     headers = {
         'x-api-key': API_KEY,
@@ -92,42 +130,44 @@ def move_file(src, dst):
 def main():
     os.makedirs(RESULT_DIR, exist_ok=True)
     os.makedirs(PROCESSED_DIR, exist_ok=True)
+    geometry_model, texture_model, resolution = prompt_user_settings()
     images = get_image_files()
     summary = []
     print(f"Found {len(images)} images to process.")
     for img in images:
         print(f"Processing: {img}")
         image_url = get_github_raw_url(img)
-        session_code, err = start_session(image_url)
+        session_code, err = start_session(image_url, geometry_model, texture_model, resolution)
         if err:
             print(f"  Error: {err}")
-            summary.append((img, None, "error", err))
+            summary.append((img, None, "error"))
             continue
         print(f"  Session code: {session_code}")
         print(f"  Waiting for model to be ready...")
         session_data, err = poll_session(session_code)
         if err:
             print(f"  Error: {err}")
-            summary.append((img, None, "error", err))
+            summary.append((img, None, "error"))
             continue
         mesh_url = session_data.get("mesh_url_glb")
-        credits = session_data.get("credits", "?")
         if not mesh_url:
             print("  No GLB mesh URL found.")
-            summary.append((img, None, "no_mesh", credits))
+            summary.append((img, None, "no_mesh"))
             continue
-        out_path = os.path.join(RESULT_DIR, f"{session_code}.glb")
+        # Save model with the same base name as the image
+        base_name = os.path.splitext(img)[0]
+        out_path = os.path.join(RESULT_DIR, f"{base_name}.glb")
         err = download_file(mesh_url, out_path)
         if err:
             print(f"  Error: {err}")
-            summary.append((img, None, "download_error", credits))
+            summary.append((img, None, "download_error"))
             continue
         move_file(os.path.join(CONCEPTS_DIR, img), os.path.join(PROCESSED_DIR, img))
-        summary.append((img, out_path, "success", credits))
+        summary.append((img, out_path, "success"))
     print("\nSummary:")
-    print(f"{'Image':30} {'Model':40} {'Status':10} {'Credits'}")
+    print(f"{'Image':30} {'Model':40} {'Status':10}")
     for row in summary:
-        print(f"{row[0]:30} {str(row[1]):40} {row[2]:10} {row[3]}")
+        print(f"{row[0]:30} {str(row[1]):40} {row[2]:10}")
 
 if __name__ == "__main__":
     main() 
