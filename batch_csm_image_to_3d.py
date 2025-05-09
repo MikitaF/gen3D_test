@@ -15,9 +15,9 @@ API_KEY = os.getenv("API_KEY")
 GITHUB_USER = os.getenv("GITHUB_USER")
 GITHUB_REPO = "gen3D_test"
 GITHUB_BRANCH = "main"
-CONCEPTS_DIR = "content/gen3D/concepts"
-PROCESSED_DIR = "content/gen3D/processed"
-RESULT_DIR = "content/gen3D/result"
+CONCEPTS_DIR = "content/concepts"
+PROCESSED_DIR = "content/processed"
+RESULT_DIR = "content/result"
 API_BASE = "https://api.csm.ai/image-to-3d-sessions"
 
 
