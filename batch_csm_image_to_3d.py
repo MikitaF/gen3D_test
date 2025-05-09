@@ -7,6 +7,7 @@ import os
 import requests
 import time
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 load_dotenv()
 
@@ -127,6 +128,31 @@ def move_file(src, dst):
     shutil.move(src, dst)
 
 
+def process_image(img, geometry_model, texture_model, resolution):
+    image_url = get_github_raw_url(img)
+    session_code, err = start_session(image_url, geometry_model, texture_model, resolution)
+    if err:
+        print(f"Processing: {img}\n  Error: {err}")
+        return (img, None, "error")
+    print(f"Processing: {img}\n  Session code: {session_code}\n  Waiting for model to be ready...")
+    session_data, err = poll_session(session_code)
+    if err:
+        print(f"Processing: {img}\n  Error: {err}")
+        return (img, None, "error")
+    mesh_url = session_data.get("mesh_url_glb")
+    if not mesh_url:
+        print(f"Processing: {img}\n  No GLB mesh URL found.")
+        return (img, None, "no_mesh")
+    base_name = os.path.splitext(img)[0]
+    out_path = os.path.join(RESULT_DIR, f"{base_name}.glb")
+    err = download_file(mesh_url, out_path)
+    if err:
+        print(f"Processing: {img}\n  Error: {err}")
+        return (img, None, "download_error")
+    move_file(os.path.join(CONCEPTS_DIR, img), os.path.join(PROCESSED_DIR, img))
+    return (img, out_path, "success")
+
+
 def main():
     os.makedirs(RESULT_DIR, exist_ok=True)
     os.makedirs(PROCESSED_DIR, exist_ok=True)
@@ -134,36 +160,11 @@ def main():
     images = get_image_files()
     summary = []
     print(f"Found {len(images)} images to process.")
-    for img in images:
-        print(f"Processing: {img}")
-        image_url = get_github_raw_url(img)
-        session_code, err = start_session(image_url, geometry_model, texture_model, resolution)
-        if err:
-            print(f"  Error: {err}")
-            summary.append((img, None, "error"))
-            continue
-        print(f"  Session code: {session_code}")
-        print(f"  Waiting for model to be ready...")
-        session_data, err = poll_session(session_code)
-        if err:
-            print(f"  Error: {err}")
-            summary.append((img, None, "error"))
-            continue
-        mesh_url = session_data.get("mesh_url_glb")
-        if not mesh_url:
-            print("  No GLB mesh URL found.")
-            summary.append((img, None, "no_mesh"))
-            continue
-        # Save model with the same base name as the image
-        base_name = os.path.splitext(img)[0]
-        out_path = os.path.join(RESULT_DIR, f"{base_name}.glb")
-        err = download_file(mesh_url, out_path)
-        if err:
-            print(f"  Error: {err}")
-            summary.append((img, None, "download_error"))
-            continue
-        move_file(os.path.join(CONCEPTS_DIR, img), os.path.join(PROCESSED_DIR, img))
-        summary.append((img, out_path, "success"))
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(process_image, img, geometry_model, texture_model, resolution): img for img in images}
+        for future in as_completed(futures):
+            result = future.result()
+            summary.append(result)
     print("\nSummary:")
     print(f"{'Image':30} {'Model':40} {'Status':10}")
     for row in summary:
